@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+raw.json
+*.jpg
+!samples/*.jpg
