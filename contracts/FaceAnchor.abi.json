@@ -1,0 +1,40 @@
+[
+  {
+    "type": "event",
+    "name": "Anchored",
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "recordHash", "type": "bytes32" },
+      { "indexed": true, "name": "submitter", "type": "address" },
+      { "indexed": false, "name": "timestamp", "type": "uint256" },
+      { "indexed": false, "name": "uri", "type": "string" }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RecordAlreadyAnchored",
+    "inputs": [{ "name": "recordHash", "type": "bytes32" }]
+  },
+  {
+    "type": "function",
+    "name": "anchor",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "recordHash", "type": "bytes32" },
+      { "name": "uri", "type": "string" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "verify",
+    "stateMutability": "view",
+    "inputs": [{ "name": "recordHash", "type": "bytes32" }],
+    "outputs": [
+      { "name": "exists", "type": "bool" },
+      { "name": "timestamp", "type": "uint256" },
+      { "name": "uri", "type": "string" },
+      { "name": "submitter", "type": "address" }
+    ]
+  }
+]

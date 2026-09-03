@@ -19,6 +19,7 @@ class SearchCandidate:
     title: str
     domain: str
     is_social: bool
+    thumbnail_url: str = ""     # Lens-hosted thumbnail, used as a download fallback
 
 
 @dataclass

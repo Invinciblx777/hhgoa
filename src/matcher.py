@@ -5,12 +5,17 @@ import sys
 import tempfile
 from urllib.parse import urlparse
 
+import cv2
+import numpy as np
 import requests
 
 from src.face_embed import cosine_similarity, detect_and_encode, sha256_file
 from src.types import FaceEncoding, MatchResult, SearchCandidate
 
-DEFAULT_THRESHOLD = 0.50    # ArcFace cosine; calibrate and record the value in README
+# ArcFace cosine. Calibrated down from 0.50 — see README "Threshold calibration":
+# 11 true matches floored at 0.5120, an 11-face negative control ceilinged at
+# -0.0257, a 0.5377-wide empty band between them. 0.40 sits inside that band.
+DEFAULT_THRESHOLD = 0.40
 
 DOWNLOAD_TIMEOUT_SECONDS = 10
 
@@ -29,8 +34,31 @@ def _suffix_for(image_url: str) -> str:
     return suffix if suffix in _ALLOWED_SUFFIXES else ".jpg"
 
 
-def _download_to_temp(image_url: str) -> str:
-    """Download an image to a temp file and return its path. Caller deletes it."""
+_NON_IMAGE_CONTENT_TYPES = ("text/", "application/json", "application/xml")
+
+
+class _NotAnImage(RuntimeError):
+    """Fetched bytes were not a usable image: wrong content-type or won't decode."""
+
+
+def _response_is_non_image(response: requests.Response) -> bool:
+    """True only when the Content-Type clearly names a non-image body.
+
+    A missing or generic type (some CDNs send application/octet-stream for real
+    images) is left for the decode check to judge.
+    """
+    ctype = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    return ctype.startswith(_NON_IMAGE_CONTENT_TYPES)
+
+
+def _decodes_as_image(path: str) -> bool:
+    buffer = np.fromfile(path, dtype=np.uint8)
+    return buffer.size > 0 and cv2.imdecode(buffer, cv2.IMREAD_COLOR) is not None
+
+
+def _fetch_one(image_url: str) -> str:
+    """Fetch a single URL to a temp file. Raises _NotAnImage if the body is not
+    a decodable image; propagates requests errors."""
     response = requests.get(
         image_url,
         timeout=DOWNLOAD_TIMEOUT_SECONDS,
@@ -38,6 +66,7 @@ def _download_to_temp(image_url: str) -> str:
         stream=True,
     )
     response.raise_for_status()
+    non_image_type = _response_is_non_image(response)
 
     handle = tempfile.NamedTemporaryFile(
         prefix="hhgoa_candidate_", suffix=_suffix_for(image_url), delete=False
@@ -46,10 +75,36 @@ def _download_to_temp(image_url: str) -> str:
         with handle:
             for chunk in response.iter_content(chunk_size=64 * 1024):
                 handle.write(chunk)
+        if non_image_type:
+            raise _NotAnImage(f"non-image content-type from {image_url}")
+        if not _decodes_as_image(handle.name):
+            raise _NotAnImage(f"undecodable image bytes from {image_url}")
     except BaseException:
         os.unlink(handle.name)
         raise
     return handle.name
+
+
+def _download_to_temp(image_url: str, fallback_url: str = "") -> tuple[str, str]:
+    """Download an image to a temp file, returning (path, url_that_worked).
+
+    If the primary URL errors, returns a non-image content-type, or yields bytes
+    that will not decode, retry once with fallback_url before giving up. This
+    recovers Instagram/Facebook candidates whose direct image URL 403s or serves
+    an HTML error page while the Lens thumbnail is still fetchable. Caller
+    deletes the file.
+    """
+    urls = [image_url]
+    if fallback_url and fallback_url != image_url:
+        urls.append(fallback_url)
+
+    last_error: Exception | None = None
+    for url in urls:
+        try:
+            return _fetch_one(url), url
+        except (requests.RequestException, _NotAnImage) as exc:
+            last_error = exc
+    raise last_error if last_error is not None else _NotAnImage(image_url)
 
 
 def match_candidates(
@@ -70,7 +125,11 @@ def match_candidates(
         label = f"[M4] {index}/{len(candidates)} {candidate.domain}"
         temp_path: str | None = None
         try:
-            temp_path = _download_to_temp(candidate.image_url)
+            temp_path, used_url = _download_to_temp(
+                candidate.image_url, candidate.thumbnail_url
+            )
+            source = "primary image" if used_url == candidate.image_url else "thumbnail"
+            print(f"{label}: fetched via {source} URL", file=sys.stderr)
             encoding = detect_and_encode(temp_path)
             if encoding is None:
                 print(f"{label}: skipped, no face detected", file=sys.stderr)
@@ -86,7 +145,7 @@ def match_candidates(
                 )
             )
             print(f"{label}: similarity {similarity:.4f}", file=sys.stderr)
-        except requests.RequestException as exc:
+        except (requests.RequestException, _NotAnImage) as exc:
             print(f"{label}: skipped, download failed: {exc}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - one bad candidate must not end the run
             print(f"{label}: skipped, {type(exc).__name__}: {exc}", file=sys.stderr)

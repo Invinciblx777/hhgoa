@@ -106,7 +106,8 @@ def _parse_visual_match(match: dict) -> SearchCandidate | None:
     direct image URL are unusable downstream and are dropped.
     """
     source_url = match.get("link") or ""
-    image_url = match.get("image") or match.get("thumbnail") or ""
+    thumbnail_url = match.get("thumbnail") or ""
+    image_url = match.get("image") or thumbnail_url
     if not source_url or not image_url:
         return None
 
@@ -117,6 +118,7 @@ def _parse_visual_match(match: dict) -> SearchCandidate | None:
         title=match.get("title") or "",
         domain=domain,
         is_social=domain in SOCIAL_DOMAINS,
+        thumbnail_url=thumbnail_url,
     )
 
 
@@ -136,6 +138,9 @@ def search_by_image(image_path: str, max_results: int = 20) -> list[SearchCandid
         params={
             "engine": "google_lens",
             "url": image_url,
+            # Pinned so the result set does not shift if the engine default
+            # changes; "all" is what visual_matches is parsed against.
+            "type": "all",
             "api_key": SERPAPI_KEY,
         },
         timeout=REQUEST_TIMEOUT_SECONDS,
