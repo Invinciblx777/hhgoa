@@ -283,4 +283,4 @@ the canonical payload returned **VERIFIED**.
 
 ## Screen recording
 
-_TODO: link_
+https://drive.google.com/file/d/1U2OoBrYRKATw8CQI1ZomVSMnktI8LZF1/view?usp=sharing
